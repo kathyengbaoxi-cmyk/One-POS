@@ -2645,7 +2645,7 @@ var db = null;
 <script>
 // ── FIREBASE SYNC ──
 (function initFirebase() {
-  var cfg = {
+  var fbCfg = {
     apiKey: "AIzaSyA6HxfYqb0g2iNik9laQJvY7ZAkIbleGgs",
     authDomain: "onle-fac3c.firebaseapp.com",
     projectId: "onle-fac3c",
@@ -2655,7 +2655,7 @@ var db = null;
   };
 
   try {
-    if (!firebase.apps.length) firebase.initializeApp(cfg);
+    if (!firebase.apps.length) firebase.initializeApp(fbCfg);
     db = firebase.firestore();
     console.log('✅ Firebase connected');
   } catch(e) {
@@ -2677,7 +2677,7 @@ var db = null;
       cfg: cfg,
       shifts: shifts,
       updatedAt: new Date().toISOString(),
-      updatedBy: (window.cfg && window.cfg.cashier) || 'Staff'
+      updatedBy: (typeof cfg !== 'undefined' && cfg.cashier) || 'Staff'
     };
     db.collection('posdata').doc('main').set(data)
       .then(function() { console.log('✅ Saved to Firebase'); })
