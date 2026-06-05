@@ -430,6 +430,7 @@ tr:hover td{background:#FAFAF8}
 <div class="panel" id="panel-reports">
   <div class="report-tabs">
     <button class="rtab act" onclick="showRTab('summary',this)">Summary</button>
+    <button class="rtab" onclick="showRTab('monthly',this)">Monthly Report</button>
     <button class="rtab" onclick="showRTab('txnlog',this)">All transactions</button>
     <button class="rtab" onclick="showRTab('topitems',this)">Top items</button>
     <button class="rtab" onclick="showRTab('payment',this)">By payment</button>
@@ -443,6 +444,58 @@ tr:hover td{background:#FAFAF8}
         <div class="card"><div class="card-title" style="font-size:12px;margin-bottom:8px">Sales by category</div><div id="rpt-cat"></div></div>
       </div>
     </div>
+    <div id="rpt-monthly" style="display:none">
+      <div class="card">
+        <div class="section-hdr" style="margin-bottom:14px">
+          <div style="font-size:15px;font-weight:700">Monthly Report</div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+          <div>
+            <label class="form-lbl">Select Year</label>
+            <select class="inp" id="monthly-year" onchange="renderMonthlyReport()" style="width:100px"></select>
+          </div>
+          <div>
+            <label class="form-lbl">Select Month</label>
+            <select class="inp" id="monthly-month" onchange="renderMonthlyReport()" style="width:140px">
+              <option value="1">January</option>
+              <option value="2">February</option>
+              <option value="3">March</option>
+              <option value="4">April</option>
+              <option value="5">May</option>
+              <option value="6">June</option>
+              <option value="7">July</option>
+              <option value="8">August</option>
+              <option value="9">September</option>
+              <option value="10">October</option>
+              <option value="11">November</option>
+              <option value="12">December</option>
+            </select>
+          </div>
+          <div style="margin-top:18px">
+            <button class="btn btn-success" onclick="exportMonthlyExcel()"><i class="ti ti-download"></i> Download Excel</button>
+          </div>
+        </div>
+        <div class="stat-grid" id="monthly-stats" style="margin-bottom:14px"></div>
+        <div class="two-col" style="margin-bottom:14px">
+          <div class="card" style="margin:0">
+            <div class="card-title" style="font-size:12px;margin-bottom:8px">Sales by category</div>
+            <div id="monthly-cat"></div>
+          </div>
+          <div class="card" style="margin:0">
+            <div class="card-title" style="font-size:12px;margin-bottom:8px">Payment breakdown</div>
+            <div id="monthly-pay"></div>
+          </div>
+        </div>
+        <div class="card" style="margin:0">
+          <div class="card-title" style="font-size:12px;margin-bottom:8px">Transactions this month</div>
+          <div class="tbl-wrap">
+            <table><thead><tr><th>Invoice</th><th>Date</th><th>Type</th><th>Customer</th><th>Items</th><th>Total (RM)</th><th>Payment</th><th>Cashier</th></tr></thead>
+            <tbody id="monthly-tbody"></tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="rpt-txnlog" style="display:none">
       <div style="display:flex;gap:7px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
         <input type="date" class="inp" id="rpt-from" style="width:135px">
@@ -1466,10 +1519,11 @@ const avgSale=activeSales?totalRev/activeSales:0;
   renderTxnLog();renderTopItems();renderPayReport();renderAccounting();
 }
 function showRTab(id,btn){
-  ['summary','txnlog','topitems','payment','accounting'].forEach(function(t){var el=document.getElementById('rpt-'+t);if(el)el.style.display=t===id?'block':'none';});
+  ['summary','monthly','txnlog','topitems','payment','accounting'].forEach(function(t){var el=document.getElementById('rpt-'+t);if(el)el.style.display=t===id?'block':'none';});
   document.querySelectorAll('#panel-reports .rtab').forEach(function(b){b.classList.remove('act');});
   btn.classList.add('act');
-  if(id==='txnlog')renderTxnLog();
+  if(id==='monthly'){initMonthlySelectors();renderMonthlyReport();}
+  else if(id==='txnlog')renderTxnLog();
   else if(id==='topitems')renderTopItems();
   else if(id==='payment')renderPayReport();
   else if(id==='accounting')renderAccounting();
@@ -2265,6 +2319,318 @@ function initCharmDrag(grid){
     });
     tile.addEventListener('dragenter',function(e){e.preventDefault();});
   });
+}
+
+function initMonthlySelectors(){
+  var yearSel = document.getElementById('monthly-year');
+  if(!yearSel) return;
+  var now = new Date();
+  var currentYear = now.getFullYear();
+  // Collect all years from transactions
+  var years = new Set();
+  years.add(currentYear);
+  [...sales, ...pjSales].forEach(function(s){
+    years.add(new Date(s.date).getFullYear());
+  });
+  var sortedYears = Array.from(years).sort(function(a,b){return b-a;});
+  yearSel.innerHTML = sortedYears.map(function(y){
+    return '<option value="'+y+'"'+(y===currentYear?' selected':'')+'>'+y+'</option>';
+  }).join('');
+  // Set current month
+  var monthSel = document.getElementById('monthly-month');
+  if(monthSel) monthSel.value = now.getMonth() + 1;
+}
+
+function renderMonthlyReport(){
+  var yearSel = document.getElementById('monthly-year');
+  var monthSel = document.getElementById('monthly-month');
+  if(!yearSel || !monthSel) return;
+
+  var year = parseInt(yearSel.value);
+  var month = parseInt(monthSel.value);
+  var monthName = monthSel.options[monthSel.selectedIndex].text;
+
+  // Filter transactions for selected month
+  var allTxn = [
+    ...sales.map(function(s){return Object.assign({},s,{_type:'sale'});}),
+    ...pjSales.map(function(s){return Object.assign({},s,{_type:'pj'});})
+  ].filter(function(s){
+    var d = new Date(s.date);
+    return d.getFullYear()===year && d.getMonth()+1===month;
+  }).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
+
+  var active = allTxn.filter(function(s){return !s.voided;});
+  var totalRev = active.reduce(function(a,s){return a+s.total;},0);
+  var totalTxn = active.length;
+  var pjRev = active.filter(function(s){return s._type==='pj';}).reduce(function(a,s){return a+s.total;},0);
+  var productRev = active.filter(function(s){return s._type==='sale';}).reduce(function(a,s){return a+s.total;},0);
+  var totalDisc = active.reduce(function(a,s){return a+(s.discount||0);},0);
+  var totalTips = active.reduce(function(a,s){return a+(s.tips||0);},0);
+  var avgSale = totalTxn ? totalRev/totalTxn : 0;
+
+  // Stats
+  document.getElementById('monthly-stats').innerHTML =
+    '<div class="stat"><div class="stat-lbl">'+monthName+' '+year+' — Total Revenue</div><div class="stat-val">RM '+totalRev.toFixed(2)+'</div></div>'+
+    '<div class="stat"><div class="stat-lbl">Transactions</div><div class="stat-val">'+totalTxn+'</div></div>'+
+    '<div class="stat"><div class="stat-lbl">Jewellery Sales (RM)</div><div class="stat-val">'+productRev.toFixed(2)+'</div></div>'+
+    '<div class="stat"><div class="stat-lbl">Permanent Jewellery (RM)</div><div class="stat-val" style="color:var(--pj)">'+pjRev.toFixed(2)+'</div></div>'+
+    '<div class="stat"><div class="stat-lbl">Total Discounts (RM)</div><div class="stat-val" style="color:var(--re)">'+totalDisc.toFixed(2)+'</div></div>'+
+    '<div class="stat"><div class="stat-lbl">Avg Sale (RM)</div><div class="stat-val">'+avgSale.toFixed(2)+'</div></div>';
+
+  // Category breakdown
+  var catMap = {};
+  active.filter(function(s){return s._type==='sale';}).forEach(function(s){
+    s.items.forEach(function(i){
+      var p = products.find(function(x){return x.id===i.id;});
+      var cat = p ? p.cat : 'Other';
+      catMap[cat] = (catMap[cat]||0) + i.price*i.qty;
+    });
+  });
+  if(pjRev>0) catMap['Permanent Jewellery'] = pjRev;
+  var catTotal = Object.values(catMap).reduce(function(a,v){return a+v;},0)||1;
+  document.getElementById('monthly-cat').innerHTML = Object.entries(catMap).sort(function(a,b){return b[1]-a[1];}).map(function(e){
+    return '<div style="margin-bottom:7px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px"><span>'+e[0]+'</span><span style="color:var(--text2)">'+fmt(e[1])+' ('+Math.round(e[1]/catTotal*100)+'%)</span></div><div class="prog-bar"><div class="prog-fill" style="width:'+Math.round(e[1]/catTotal*100)+'%;background:'+(e[0]==='Permanent Jewellery'?'#534AB7':'#185FA5')+'"></div></div></div>';
+  }).join('') || '<div class="empty-msg">No data</div>';
+
+  // Payment breakdown
+  var payMap = {};
+  active.forEach(function(s){
+    if(!payMap[s.payment]) payMap[s.payment]={count:0,total:0};
+    payMap[s.payment].count++;
+    payMap[s.payment].total+=s.total;
+  });
+  var payTotal = Object.values(payMap).reduce(function(a,v){return a+v.total;},0)||1;
+  document.getElementById('monthly-pay').innerHTML = Object.entries(payMap).sort(function(a,b){return b[1].total-a[1].total;}).map(function(e){
+    return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:600">'+pmLabel(e[0])+'</span><span>'+e[1].count+' txn &nbsp; <strong>'+fmt(e[1].total)+'</strong> &nbsp; <span style="color:var(--text3)">'+Math.round(e[1].total/payTotal*100)+'%</span></span></div>';
+  }).join('') || '<div class="empty-msg">No data</div>';
+
+  // Transactions table
+  document.getElementById('monthly-tbody').innerHTML = allTxn.length ? allTxn.map(function(s){
+    var isPJ = s._type==='pj';
+    var desc = isPJ ? 'Chain: '+s.chain+(s.charms&&s.charms.length?' + '+s.charms.length+' charm(s)':'') : s.items.map(function(i){return i.name+' x'+i.qty;}).join(', ');
+    return '<tr class="'+(s.voided?'voided':'')+'">'+
+      '<td style="font-weight:600">'+(s.invNo||(isPJ?'PJ-':'INV-')+s.id)+'</td>'+
+      '<td>'+new Date(s.date).toLocaleString('en-MY')+'</td>'+
+      '<td><span class="badge '+(isPJ?'b-pj':'b-blue')+'">'+(isPJ?'PJ':'Sale')+'</span></td>'+
+      '<td>'+s.customer+'</td>'+
+      '<td style="font-size:11px;max-width:160px">'+desc+'</td>'+
+      '<td style="font-weight:600">'+fmt(s.total)+'</td>'+
+      '<td>'+pmLabel(s.payment)+'</td>'+
+      '<td style="color:var(--text2)">'+s.cashier+'</td>'+
+      '</tr>';
+  }).join('') : '<tr><td colspan="8" class="empty-msg">No transactions this month.</td></tr>';
+}
+
+function exportMonthlyExcel(){
+  if(typeof XLSX==='undefined'){toast('Loading...',1);return;}
+  var yearSel=document.getElementById('monthly-year');
+  var monthSel=document.getElementById('monthly-month');
+  if(!yearSel||!monthSel)return;
+  var year=parseInt(yearSel.value);
+  var month=parseInt(monthSel.value);
+  var monthName=monthSel.options[monthSel.selectedIndex].text;
+
+  var allTxn=[
+    ...sales.map(function(s){return Object.assign({},s,{_type:'sale'});}),
+    ...pjSales.map(function(s){return Object.assign({},s,{_type:'pj'});})
+  ].filter(function(s){
+    var d=new Date(s.date);
+    return d.getFullYear()===year&&d.getMonth()+1===month;
+  }).sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+
+  var active=allTxn.filter(function(s){return !s.voided;});
+  var totalRev=active.reduce(function(a,s){return a+s.total;},0);
+  var pjRev=active.filter(function(s){return s._type==='pj';}).reduce(function(a,s){return a+s.total;},0);
+  var productRev=active.filter(function(s){return s._type==='sale';}).reduce(function(a,s){return a+s.total;},0);
+  var totalDisc=active.reduce(function(a,s){return a+(s.discount||0);},0);
+  var totalTips=active.reduce(function(a,s){return a+(s.tips||0);},0);
+
+  var wb=XLSX.utils.book_new();
+
+  // ── SHEET 1: SUMMARY ──
+  var payMap={};
+  active.forEach(function(s){
+    var lbl=pmLabel(s.payment);
+    if(!payMap[lbl])payMap[lbl]={count:0,total:0};
+    payMap[lbl].count++;payMap[lbl].total+=s.total;
+  });
+  var summaryRows=[
+    ['ONLE Studio — Monthly Report','',''],
+    [monthName+' '+year,'',''],
+    ['','',''],
+    ['REVENUE SUMMARY','',''],
+    ['Total Revenue (RM)',totalRev.toFixed(2),''],
+    ['Jewellery Product Sales (RM)',productRev.toFixed(2),''],
+    ['Permanent Jewellery Services (RM)',pjRev.toFixed(2),''],
+    ['','',''],
+    ['TRANSACTIONS','',''],
+    ['Total Transactions',active.length,''],
+    ['Product Sales Transactions',active.filter(function(s){return s._type==='sale';}).length,''],
+    ['PJ Service Transactions',active.filter(function(s){return s._type==='pj';}).length,''],
+    ['Voided Transactions',allTxn.filter(function(s){return s.voided;}).length,''],
+    ['','',''],
+    ['AVERAGES','',''],
+    ['Average Sale Value (RM)',(active.length?(totalRev/active.length):0).toFixed(2),''],
+    ['','',''],
+    ['DEDUCTIONS','',''],
+    ['Total Discounts Given (RM)',totalDisc.toFixed(2),''],
+    ['Total Tips Collected (RM)',totalTips.toFixed(2),''],
+    ['','',''],
+    ['PAYMENT METHOD BREAKDOWN','',''],
+    ['Payment Method','Transactions','Total (RM)'],
+  ];
+  Object.entries(payMap).sort(function(a,b){return b[1].total-a[1].total;}).forEach(function(e){
+    summaryRows.push([e[0],e[1].count,e[1].total.toFixed(2)]);
+  });
+  var ws1=XLSX.utils.aoa_to_sheet(summaryRows);
+  ws1['!cols']=[{wch:35},{wch:20},{wch:15}];
+  XLSX.utils.book_append_sheet(wb,ws1,'Summary');
+
+  // ── SHEET 2: ALL TRANSACTIONS ──
+  var txnData=allTxn.map(function(s){
+    var isPJ=s._type==='pj';
+    var invNo=s.invNo||(isPJ?'PJ-':'INV-')+s.id;
+    var desc=isPJ
+      ?'Chain: '+s.chain+(s.charms&&s.charms.length?' + '+s.charms.map(function(c){return c.name+' x'+c.qty;}).join(', '):'')
+      :s.items.map(function(i){return i.name+' x'+i.qty;}).join('; ');
+    var subtotal=isPJ?(s.chainPrice+(s.charmTotal||0)):s.subtotal;
+    return {
+      'Invoice No.': invNo,
+      'Date': new Date(s.date).toLocaleDateString('en-MY'),
+      'Time': new Date(s.date).toLocaleTimeString('en-MY'),
+      'Type': isPJ?'Permanent Jewellery':'Jewellery Product',
+      'Customer': s.customer,
+      'Items / Description': desc,
+      'Subtotal (RM)': parseFloat((subtotal||0).toFixed(2)),
+      'Discount (RM)': parseFloat((s.discount||0).toFixed(2)),
+      'Total (RM)': parseFloat(s.total.toFixed(2)),
+      'Tips (RM)': parseFloat((s.tips||0).toFixed(2)),
+      'Payment Method': pmLabel(s.payment),
+      'Cashier': s.cashier,
+      'Status': s.voided?'VOIDED':'Active',
+      'Void Reason': s.voidReason||''
+    };
+  });
+  var ws2=XLSX.utils.json_to_sheet(txnData.length?txnData:[{'Note':'No transactions this month'}]);
+  ws2['!cols']=[{wch:18},{wch:12},{wch:10},{wch:22},{wch:18},{wch:40},{wch:12},{wch:12},{wch:12},{wch:10},{wch:18},{wch:12},{wch:8},{wch:20}];
+  XLSX.utils.book_append_sheet(wb,ws2,'All Transactions');
+
+  // ── SHEET 3: PRODUCT SALES ──
+  var prodMap={};
+  active.filter(function(s){return s._type==='sale';}).forEach(function(s){
+    s.items.forEach(function(i){
+      var key=i.id+'|'+i.name;
+      if(!prodMap[key])prodMap[key]={sku:'',name:i.name,cat:'',qty:0,revenue:0,invoices:[]};
+      var p=products.find(function(x){return x.id===i.id;});
+      if(p){prodMap[key].sku=p.sku;prodMap[key].cat=p.cat;}
+      prodMap[key].qty+=i.qty;
+      prodMap[key].revenue+=i.price*i.qty;
+      prodMap[key].invoices.push(s.invNo||'INV-'+s.id);
+    });
+  });
+  var prodData=Object.values(prodMap).sort(function(a,b){return b.revenue-a.revenue;}).map(function(p,i){
+    return {
+      'Rank': i+1,
+      'SKU': p.sku||'—',
+      'Product Name': p.name,
+      'Category': p.cat||'—',
+      'Units Sold': p.qty,
+      'Revenue (RM)': parseFloat(p.revenue.toFixed(2)),
+      'Invoice Numbers': p.invoices.join(', ')
+    };
+  });
+  var ws3=XLSX.utils.json_to_sheet(prodData.length?prodData:[{'Note':'No product sales this month'}]);
+  ws3['!cols']=[{wch:6},{wch:12},{wch:28},{wch:14},{wch:12},{wch:14},{wch:40}];
+  XLSX.utils.book_append_sheet(wb,ws3,'Product Sales');
+
+  // ── SHEET 4: DAILY REVENUE ──
+  var dayMap={};
+  allTxn.forEach(function(s){
+    var d=new Date(s.date).toLocaleDateString('en-MY');
+    if(!dayMap[d])dayMap[d]={date:d,txn:0,revenue:0,disc:0,tips:0,cash:0,nonCash:0,voided:0,invoices:[]};
+    if(s.voided){dayMap[d].voided+=s.total;}
+    else{
+      dayMap[d].txn++;
+      dayMap[d].revenue+=s.total;
+      dayMap[d].disc+=(s.discount||0);
+      dayMap[d].tips+=(s.tips||0);
+      if(s.payment==='cash')dayMap[d].cash+=s.total;
+      else dayMap[d].nonCash+=s.total;
+      dayMap[d].invoices.push(s.invNo||(s._type==='pj'?'PJ-':'INV-')+s.id);
+    }
+  });
+  var dailyData=Object.values(dayMap).sort(function(a,b){return new Date(a.date)-new Date(b.date);}).map(function(d){
+    return {
+      'Date': d.date,
+      'Transactions': d.txn,
+      'Gross Revenue (RM)': parseFloat(d.revenue.toFixed(2)),
+      'Discounts (RM)': parseFloat(d.disc.toFixed(2)),
+      'Net Revenue (RM)': parseFloat((d.revenue-d.disc).toFixed(2)),
+      'Tips (RM)': parseFloat(d.tips.toFixed(2)),
+      'Cash Sales (RM)': parseFloat(d.cash.toFixed(2)),
+      'Non-Cash Sales (RM)': parseFloat(d.nonCash.toFixed(2)),
+      'Voided (RM)': parseFloat(d.voided.toFixed(2)),
+      'Invoice Numbers': d.invoices.join(', ')
+    };
+  });
+  // Add totals row
+  if(dailyData.length){
+    dailyData.push({
+      'Date':'TOTAL',
+      'Transactions':dailyData.reduce(function(a,d){return a+d['Transactions'];},0),
+      'Gross Revenue (RM)':parseFloat(dailyData.reduce(function(a,d){return a+d['Gross Revenue (RM)'];},0).toFixed(2)),
+      'Discounts (RM)':parseFloat(dailyData.reduce(function(a,d){return a+d['Discounts (RM)'];},0).toFixed(2)),
+      'Net Revenue (RM)':parseFloat(dailyData.reduce(function(a,d){return a+d['Net Revenue (RM)'];},0).toFixed(2)),
+      'Tips (RM)':parseFloat(dailyData.reduce(function(a,d){return a+d['Tips (RM)'];},0).toFixed(2)),
+      'Cash Sales (RM)':parseFloat(dailyData.reduce(function(a,d){return a+d['Cash Sales (RM)'];},0).toFixed(2)),
+      'Non-Cash Sales (RM)':parseFloat(dailyData.reduce(function(a,d){return a+d['Non-Cash Sales (RM)'];},0).toFixed(2)),
+      'Voided (RM)':parseFloat(dailyData.reduce(function(a,d){return a+d['Voided (RM)'];},0).toFixed(2)),
+      'Invoice Numbers':''
+    });
+  }
+  var ws4=XLSX.utils.json_to_sheet(dailyData.length?dailyData:[{'Note':'No data'}]);
+  ws4['!cols']=[{wch:12},{wch:13},{wch:18},{wch:14},{wch:16},{wch:10},{wch:14},{wch:18},{wch:12},{wch:50}];
+  XLSX.utils.book_append_sheet(wb,ws4,'Daily Revenue');
+
+  // ── SHEET 5: PAYMENT METHODS ──
+  var payData=Object.entries(payMap).sort(function(a,b){return b[1].total-a[1].total;}).map(function(e){
+    return {
+      'Payment Method': e[0],
+      'Transactions': e[1].count,
+      'Total (RM)': parseFloat(e[1].total.toFixed(2)),
+      'Share (%)': parseFloat((e[1].total/totalRev*100).toFixed(1))
+    };
+  });
+  if(payData.length) payData.push({'Payment Method':'TOTAL','Transactions':active.length,'Total (RM)':parseFloat(totalRev.toFixed(2)),'Share (%)':100});
+  var ws5=XLSX.utils.json_to_sheet(payData.length?payData:[{'Note':'No data'}]);
+  ws5['!cols']=[{wch:20},{wch:14},{wch:14},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws5,'Payment Methods');
+
+  // ── SHEET 6: PERMANENT JEWELLERY ──
+  var pjData=active.filter(function(s){return s._type==='pj';}).map(function(s){
+    var charmDesc=s.charms&&s.charms.length?s.charms.map(function(c){return c.name+' x'+c.qty+' (RM'+c.price.toFixed(2)+')';}).join(', '):'None';
+    return {
+      'Invoice No.': s.invNo||'PJ-'+s.id,
+      'Date': new Date(s.date).toLocaleDateString('en-MY'),
+      'Time': new Date(s.date).toLocaleTimeString('en-MY'),
+      'Customer': s.customer,
+      'Chain': s.chain,
+      'Chain Price (RM)': parseFloat((s.chainPrice||0).toFixed(2)),
+      'Charms': charmDesc,
+      'Charm Total (RM)': parseFloat((s.charmTotal||0).toFixed(2)),
+      'Total (RM)': parseFloat(s.total.toFixed(2)),
+      'Tips (RM)': parseFloat((s.tips||0).toFixed(2)),
+      'Payment Method': pmLabel(s.payment),
+      'Staff Note': s.note||'',
+      'Cashier': s.cashier
+    };
+  });
+  var ws6=XLSX.utils.json_to_sheet(pjData.length?pjData:[{'Note':'No PJ sales this month'}]);
+  ws6['!cols']=[{wch:18},{wch:12},{wch:10},{wch:18},{wch:22},{wch:14},{wch:45},{wch:14},{wch:12},{wch:10},{wch:18},{wch:20},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws6,'Permanent Jewellery');
+
+  XLSX.writeFile(wb,'ONLE_'+monthName+'_'+year+'_Report.xlsx');
+  toast('Downloaded: ONLE_'+monthName+'_'+year+'_Report.xlsx');
 }
 </script>
 </body>
