@@ -244,8 +244,8 @@ tr:hover td{background:#FAFAF8}
 .reconcile-row.total{font-weight:700;font-size:14px;padding-top:8px}
 .empty-msg{text-align:center;padding:20px 0;color:var(--text3);font-size:12px}
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+
+
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 </head>
 <body>
@@ -976,7 +976,7 @@ function genInvNo(type){
 let nextChainId=Math.max(0,...pjChains.map(c=>c.id))+1;
 let nextCharmId=Math.max(0,...pjCharms.map(c=>c.id))+1;
 
-function save(){LS.set('products',products);LS.set('customers',customers);LS.set('sales',sales);LS.set('returns',returns_);LS.set('cfg',cfg);LS.set('pjsales',pjSales);LS.set('pjchains',pjChains);LS.set('pjcharms',pjCharms);LS.set('gscfg',gsCfg);}
+function save(){LS.set('products',products);LS.set('customers',customers);LS.set('sales',sales);LS.set('returns',returns_);LS.set('cfg',cfg);LS.set('pjsales',pjSales);LS.set('pjchains',pjChains);LS.set('pjcharms',pjCharms);LS.set('gscfg',gsCfg);window._lastFbSave=Date.now();if(typeof window.fbSaveAll==='function')window.fbSaveAll();;window._lastFbSave=Date.now();if(typeof window.fbSaveAll==='function')window.fbSaveAll();}
 function toast(msg,err){const t=document.getElementById('toast');t.textContent=msg;t.style.background=err?'#A32D2D':'#1D9E75';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800)}
 function fmt(n){return 'RM '+parseFloat(n||0).toFixed(2)}
 function closeModal(id){
@@ -2635,132 +2635,143 @@ function exportMonthlyExcel(){
   toast('Downloaded: ONLE_'+monthName+'_'+year+'_Report.xlsx');
 }
 
-// ── FIREBASE CONFIG ──
-var firebaseConfig = {
-  apiKey: "AIzaSyA6HxfYqb0g2iNik9laQJvY7ZAkIbleGgs",
-  authDomain: "onle-fac3c.firebaseapp.com",
-  projectId: "onle-fac3c",
-  storageBucket: "onle-fac3c.firebasestorage.app",
-  messagingSenderId: "1076380996163",
-  appId: "1:1076380996163:web:35937b2cd949da876a7af6"
-};
-firebase.initializeApp(firebaseConfig);
-var db = firebase.firestore();
+var db = null;
 
+
+
+
+</script>
+
+<script>
 // ── FIREBASE SYNC ──
-var _fbListeners = [];
-
-function fbSaveAll(){
-  var data = {
-    products: products,
-    customers: customers,
-    sales: sales,
-    pjSales: pjSales,
-    pjChains: pjChains,
-    pjCharms: pjCharms,
-    returns_: returns_,
-    cfg: cfg,
-    shifts: shifts,
-    updatedAt: new Date().toISOString(),
-    updatedBy: cfg.cashier || 'Staff'
+(function initFirebase() {
+  var cfg = {
+    apiKey: "AIzaSyA6HxfYqb0g2iNik9laQJvY7ZAkIbleGgs",
+    authDomain: "onle-fac3c.firebaseapp.com",
+    projectId: "onle-fac3c",
+    storageBucket: "onle-fac3c.firebasestorage.app",
+    messagingSenderId: "1076380996163",
+    appId: "1:1076380996163:web:35937b2cd949da876a7af6"
   };
-  db.collection('posdata').doc('main').set(data)
-    .then(function(){ console.log('Firebase saved'); })
-    .catch(function(e){ console.warn('Firebase save error:', e); });
-}
 
-function fbListen(){
-  // Real-time listener - auto update when any device changes data
-  var unsub = db.collection('posdata').doc('main').onSnapshot(function(doc){
-    if(!doc.exists) return;
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(cfg);
+    db = firebase.firestore();
+    console.log('✅ Firebase connected');
+  } catch(e) {
+    console.warn('Firebase init failed:', e);
+    return;
+  }
+
+  // ── SAVE TO FIREBASE ──
+  window.fbSaveAll = function() {
+    if (!db) return;
+    var data = {
+      products: products,
+      customers: customers,
+      sales: sales,
+      pjSales: pjSales,
+      pjChains: pjChains,
+      pjCharms: pjCharms,
+      returns_: returns_,
+      cfg: cfg,
+      shifts: shifts,
+      updatedAt: new Date().toISOString(),
+      updatedBy: (window.cfg && window.cfg.cashier) || 'Staff'
+    };
+    db.collection('posdata').doc('main').set(data)
+      .then(function() { console.log('✅ Saved to Firebase'); })
+      .catch(function(e) { console.warn('Firebase save error:', e); });
+  };
+
+  // ── LISTEN FOR CHANGES (real-time sync) ──
+  db.collection('posdata').doc('main').onSnapshot(function(doc) {
+    if (!doc.exists) return;
     var data = doc.data();
-    if(!data) return;
-    // Don't overwrite if we just saved (within 2 seconds)
-    if(window._lastFbSave && Date.now() - window._lastFbSave < 2000) return;
+    if (!data) return;
+    // Skip if we just saved from this device
+    if (window._lastFbSave && Date.now() - window._lastFbSave < 3000) return;
 
-    products = data.products || products;
-    customers = data.customers || customers;
-    sales = data.sales || sales;
-    pjSales = data.pjSales || pjSales;
-    pjChains = data.pjChains || pjChains;
-    pjCharms = data.pjCharms || pjCharms;
-    returns_ = data.returns_ || returns_;
-    cfg = data.cfg || cfg;
-    shifts = data.shifts || shifts;
+    if (data.products) products = data.products;
+    if (data.customers) customers = data.customers;
+    if (data.sales) sales = data.sales;
+    if (data.pjSales) pjSales = data.pjSales;
+    if (data.pjChains) pjChains = data.pjChains;
+    if (data.pjCharms) pjCharms = data.pjCharms;
+    if (data.returns_) returns_ = data.returns_;
+    if (data.shifts) shifts = data.shifts;
 
-    // Recalculate IDs
-    nextProdId = products.length ? Math.max.apply(null, products.map(function(p){return p.id;})) + 1 : 1;
-    nextCustId = customers.length ? Math.max.apply(null, customers.map(function(c){return c.id;})) + 1 : 1;
-    nextSaleId = sales.length ? Math.max.apply(null, sales.map(function(s){return s.id;})) + 1 : 1001;
-    nextPJId = pjSales.length ? Math.max.apply(null, pjSales.map(function(s){return s.id;})) + 1 : 8001;
-    nextChainId = pjChains.length ? Math.max.apply(null, pjChains.map(function(c){return c.id;})) + 1 : 1;
-    nextCharmId = pjCharms.length ? Math.max.apply(null, pjCharms.map(function(c){return c.id;})) + 1 : 1;
+    // Recalculate next IDs
+    if (products.length) nextProdId = Math.max.apply(null, products.map(function(p){return p.id;})) + 1;
+    if (customers.length) nextCustId = Math.max.apply(null, customers.map(function(c){return c.id;})) + 1;
+    if (sales.length) nextSaleId = Math.max.apply(null, sales.map(function(s){return s.id;})) + 1;
+    if (pjSales.length) nextPJId = Math.max.apply(null, pjSales.map(function(s){return s.id;})) + 1;
+    if (pjChains.length) nextChainId = Math.max.apply(null, pjChains.map(function(c){return c.id;})) + 1;
+    if (pjCharms.length) nextCharmId = Math.max.apply(null, pjCharms.map(function(c){return c.id;})) + 1;
 
-    // Save to localStorage too
+    // Save to localStorage
     LS.set('products', products);
     LS.set('customers', customers);
     LS.set('sales', sales);
     LS.set('pjsales', pjSales);
     LS.set('pjchains', pjChains);
     LS.set('pjcharms', pjCharms);
-    LS.set('returns', returns_);
-    LS.set('cfg', cfg);
-    LS.set('shifts', shifts);
 
     // Refresh UI
     renderProds();
     populateCustDrop();
-    updateClock();
-    toast('Data synced from cloud ☁️');
-    console.log('Firebase data received, updated by:', data.updatedBy);
-  }, function(error){
-    console.warn('Firebase listener error:', error);
+    console.log('✅ Synced from Firebase, updated by:', data.updatedBy);
+
+  }, function(err) {
+    console.warn('Firebase listener error:', err);
   });
-  _fbListeners.push(unsub);
-}
 
-// Firebase auto-save is called from fbSaveAll() which is triggered after each save
-
-// Start listening when page loads
-setTimeout(function(){
-  fbListen();
-  // Load from Firebase on first open (in case localStorage is empty)
-  db.collection('posdata').doc('main').get().then(function(doc){
-    if(doc.exists){
-      var data = doc.data();
-      if(data && data.products && data.products.length > 0){
-        products = data.products;
-        customers = data.customers || customers;
-        sales = data.sales || sales;
-        pjSales = data.pjSales || pjSales;
-        pjChains = data.pjChains || pjChains;
-        pjCharms = data.pjCharms || pjCharms;
-        returns_ = data.returns_ || returns_;
-        cfg = data.cfg || cfg;
-        shifts = data.shifts || shifts;
-
-        nextProdId = products.length ? Math.max.apply(null, products.map(function(p){return p.id;})) + 1 : 1;
-        nextCustId = customers.length ? Math.max.apply(null, customers.map(function(c){return c.id;})) + 1 : 1;
-        nextSaleId = sales.length ? Math.max.apply(null, sales.map(function(s){return s.id;})) + 1 : 1001;
-        nextPJId = pjSales.length ? Math.max.apply(null, pjSales.map(function(s){return s.id;})) + 1 : 8001;
-        nextChainId = pjChains.length ? Math.max.apply(null, pjChains.map(function(c){return c.id;})) + 1 : 1;
-        nextCharmId = pjCharms.length ? Math.max.apply(null, pjCharms.map(function(c){return c.id;})) + 1 : 1;
-
-        LS.set('products', products);
-        LS.set('customers', customers);
-        LS.set('sales', sales);
-        LS.set('pjsales', pjSales);
-        LS.set('pjchains', pjChains);
-        LS.set('pjcharms', pjCharms);
-
-        renderProds();
-        populateCustDrop();
-        updateClock();
-        console.log('Loaded from Firebase:', data.products.length, 'products');
+  // ── LOAD DATA FROM FIREBASE ON FIRST OPEN ──
+  db.collection('posdata').doc('main').get().then(function(doc) {
+    if (!doc.exists) {
+      // No cloud data yet - push local data to Firebase
+      if (products.length > 0) {
+        window.fbSaveAll();
+        console.log('Pushed local data to Firebase');
       }
+      return;
     }
-  }).catch(function(e){ console.warn('Firebase load error:', e); });
-}, 1500);
+    var data = doc.data();
+    if (!data || !data.products || data.products.length === 0) return;
+
+    // Use Firebase data (more up to date)
+    products = data.products;
+    if (data.customers) customers = data.customers;
+    if (data.sales) sales = data.sales;
+    if (data.pjSales) pjSales = data.pjSales;
+    if (data.pjChains) pjChains = data.pjChains;
+    if (data.pjCharms) pjCharms = data.pjCharms;
+    if (data.returns_) returns_ = data.returns_;
+    if (data.shifts) shifts = data.shifts;
+
+    if (products.length) nextProdId = Math.max.apply(null, products.map(function(p){return p.id;})) + 1;
+    if (customers.length) nextCustId = Math.max.apply(null, customers.map(function(c){return c.id;})) + 1;
+    if (sales.length) nextSaleId = Math.max.apply(null, sales.map(function(s){return s.id;})) + 1;
+    if (pjSales.length) nextPJId = Math.max.apply(null, pjSales.map(function(s){return s.id;})) + 1;
+    if (pjChains.length) nextChainId = Math.max.apply(null, pjChains.map(function(c){return c.id;})) + 1;
+    if (pjCharms.length) nextCharmId = Math.max.apply(null, pjCharms.map(function(c){return c.id;})) + 1;
+
+    LS.set('products', products);
+    LS.set('customers', customers);
+    LS.set('sales', sales);
+    LS.set('pjsales', pjSales);
+    LS.set('pjchains', pjChains);
+    LS.set('pjcharms', pjCharms);
+
+    renderProds();
+    populateCustDrop();
+    console.log('✅ Loaded from Firebase:', products.length, 'products');
+
+  }).catch(function(e) {
+    console.warn('Firebase load error:', e);
+  });
+
+})();
 </script>
 </body>
 </html>
